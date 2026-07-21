@@ -1,0 +1,40 @@
+name: Auto approve
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  WATCH_DIR: docs/   # only PRs touching solely this folder get auto-approved
+
+jobs:
+  auto-approve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only approve if every changed file is under WATCH_DIR
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            -q '.[].filename')
+          echo "Changed files:"; echo "$files"
+          # ponytail: prefix match; a folder named "docsx" would also match "docs" — rename WATCH_DIR with trailing slash avoids it (kept)
+          outside=$(printf '%s\n' "$files" | grep -v "^${WATCH_DIR}" || true)
+          if [ -z "$files" ] || [ -n "$outside" ]; then
+            echo "Not approving — files outside ${WATCH_DIR} (or none found):"; echo "$outside"
+            echo "approve=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "approve=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Approve
+        if: steps.check.outputs.approve == 'true'
+        uses: hmarr/auto-approve-action@v4
+        with:
+          github-token: ${{ github.token }}
